@@ -3,141 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Masaaki Kanji OCR - Final Edition</title>
+    <title>Masaaki Kanji OCR - Precision Pro</title>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
     <style>
-        /* 기본 레이아웃: 화면을 꽉 채우되 넘치지 않게 설정 */
-        body { 
-            margin: 0; 
-            font-family: 'Pretendard', sans-serif; 
-            display: flex; 
-            flex-direction: column; 
-            height: 100vh; /* 전체 높이 */
-            height: 100svh; /* 모바일 하단바 고려한 최신 높이 규격 */
-            background: #1a1a1a; 
-            color: white; 
-            overflow: hidden; 
+        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; height: 100svh; background: #1a1a1a; color: white; overflow: hidden; }
+        
+        /* 비디오 및 가이드 박스 영역 */
+        .camera-container { position: relative; flex: 1; width: 100%; background: black; overflow: hidden; }
+        #video { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* 조준창 (가이드 박스) */
+        .guide-box {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 250px; height: 150px;
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); /* 박스 외곽 어둡게 */
+            pointer-events: none;
+            display: flex; justify-content: center; align-items: center;
         }
-    
-        /* 비디오: 남는 공간을 다 차지하되, 버튼 영역을 침범하지 않음 */
-        #video { 
-            width: 100%; 
-            flex: 1; 
-            min-height: 0; /* 중요: flex 안에서 크기가 유연하게 줄어들게 함 */
-            background: black; 
-            object-fit: cover; 
-        }
-    
-        /* 결과 한자 리스트: 버튼 바로 위에 위치 */
-        #result { 
-            padding: 10px; 
-            display: flex; 
-            flex-wrap: wrap; 
-            gap: 8px; 
-            background: rgba(0,0,0,0.5); 
-            max-height: 120px; 
-            overflow-y: auto; 
-            justify-content: center;
-        }
-    
-        .kanji-btn { 
-            padding: 10px 15px; 
-            font-size: 24px; 
-            border: none; 
-            border-radius: 8px; 
-            background: #ffffff; 
-            color: #333; 
-            font-weight: bold; 
-        }
-    
-        /* 컨트롤 섹션: 무조건 화면 맨 하단에 고정 */
-        .controls { 
-            padding: 15px 20px 30px 20px; /* 하단 여백을 넉넉히 주어 가려짐 방지 */
-            display: grid; 
-            grid-template-columns: 1fr 1fr; /* 버튼 두 개를 나란히 */
-            gap: 10px; 
-            background: #2d2d2d; 
-            border-radius: 20px 20px 0 0;
-        }
-    
-        button { 
-            padding: 15px; 
-            font-size: 16px; 
-            border: none; 
-            border-radius: 12px; 
-            background: #007bff; 
-            color: white; 
-            font-weight: bold; 
-            cursor: pointer; 
-        }
-    
-        /* 분석 중/모달 오버레이는 기존과 동일 */
+        .guide-box::after { content: "이 안에 한자를 맞추세요"; font-size: 12px; color: #00ff00; margin-top: 170px; }
+
+        /* 결과 및 버튼 */
+        #result { padding: 10px; display: flex; flex-wrap: wrap; gap: 8px; background: #1a1a1a; min-height: 60px; overflow-y: auto; justify-content: center; }
+        .kanji-btn { padding: 10px 15px; font-size: 24px; border: none; border-radius: 8px; background: #ffffff; color: #333; font-weight: bold; }
+        
+        .controls { padding: 15px 20px 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #2d2d2d; border-radius: 20px 20px 0 0; }
+        button { padding: 15px; font-size: 16px; border: none; border-radius: 12px; background: #007bff; color: white; font-weight: bold; cursor: pointer; }
+        
+        /* 분석 중 오버레이 */
         .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); color: white; justify-content: center; align-items: center; z-index: 1000; text-align: center; }
-        #detail-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; justify-content: center; align-items: flex-end; }
-        .modal-content { background: white; color: #333; width: 100%; max-width: 500px; padding: 30px; border-radius: 30px 30px 0 0; box-sizing: border-box; }
     </style>
 </head>
 <body>
-    <!-- 로딩 화면 -->
-    <div id="loading" class="overlay">
-        <div>
-            <div class="spinner"></div>
-            <strong style="font-size: 20px;">AI 한자 분석 중...</strong><br>
-            <span id="progress" style="color: #007bff; font-weight: bold;">대기 중</span>
-        </div>
+    <div id="loading" class="overlay"><div><strong style="font-size: 20px;">중앙 영역 정밀 분석 중...</strong><br><span id="progress">0%</span></div></div>
+
+    <div class="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="guide-box"></div> <!-- 조준창 추가 -->
     </div>
 
-    <!-- 카메라 화면 -->
-    <video id="video" autoplay playsinline></video>
-
-    <!-- 결과 한자 버튼 나열 구역 -->
     <div id="result"></div>
 
-    <!-- 컨트롤 버튼 -->
     <div class="controls">
-        <button onclick="captureAndOCR()" style="background: #28a745;">🔍 한자 추출하기</button>
-        <button onclick="startCamera()" style="background: #6c757d; font-size: 14px;">카메라 재연결</button>
-    </div>
-
-    <!-- 상세 정보 모달 -->
-    <div id="detail-modal" onclick="closeModal()">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <p id="modal-kanji" class="modal-kanji"></p>
-                <div class="modal-title-wrap">
-                    <span id="modal-level" class="level-badge"></span>
-                    <span id="modal-meaning" style="font-size: 24px; font-weight: bold;"></span>
-                </div>
-            </div>
-            <hr style="border: 0; border-top: 1px solid #eee; margin-bottom: 20px;">
-            <div class="info-row">
-                <span class="info-label">연상 스토리</span>
-                <div class="story-box" id="modal-story"></div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                <div class="info-row">
-                    <span class="info-label">음독 (On)</span>
-                    <span class="info-value" id="modal-on"></span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">훈독 (Kun)</span>
-                    <span class="info-value" id="modal-kun"></span>
-                </div>
-            </div>
-            <button onclick="closeModal()" style="width: 100%; background: #333; margin-top: 10px;">확인 완료</button>
-        </div>
+        <button onclick="captureAndOCR()" style="background: #28a745;">🔍 조준 영역 추출</button>
+        <button onclick="startCamera()" style="background: #6c757d;">카메라 리셋</button>
     </div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        // 마사아키 CEO의 통합 한자 지식 창고
         const KANJI_DB = {
-            "宿": { "meaning": "숙소/잠잘 숙", "level": "N4", "on": "シュク (슈쿠)", "kun": "야도 (やど)", "story": "집(宀)에서 사람이 일백(百)번 잠을 자는 곳이 '숙소'입니다." },
-            "泊": { "meaning": "머무를 박", "level": "N4", "on": "ハク (하쿠)", "kun": "토마리 (とまり)", "story": "물(氵)가에서 하얗게(白) 밤을 지새우며 배가 '머무는' 모습입니다." },
-            "税": { "meaning": "세금 세", "level": "N3", "on": "ゼイ (제이)", "kun": "-", "story": "벼(禾)를 수확해서 기쁘게(兌) 바치는 것이 '세금'입니다." },
-            "案": { "meaning": "안석/책상 안", "level": "N3", "on": "アン (안)", "kun": "-", "story": "집 안에서 여자(女)가 나무(木) 책상에 앉아 '계획(안)'을 짜는 모습입니다." },
-            "構": { "meaning": "얽을 구", "level": "N2", "on": "コウ (코우)", "kun": "카마에 (かまえ)", "story": "나무(木)를 짤 때 꼼꼼하게(冓) 얽어서 '구조'를 만드는 것입니다." }
+            "宿": { "meaning": "숙소/잠잘 숙", "level": "N4", "on": "シュク", "kun": "やど", "story": "집(宀)에서 사람이 일백(百)번 잠을 자는 곳이 '숙소'입니다." },
+            "泊": { "meaning": "머무를 박", "level": "N4", "on": "ハク", "kun": "とまり", "story": "물(氵)가에서 하얗게(白) 밤을 지새우며 배가 '머무는' 모습입니다." },
+            "税": { "meaning": "세금 세", "level": "N3", "on": "ゼ이", "kun": "-", "story": "벼(禾)를 수확해서 기쁘게(兌) 바치는 것이 '세금'입니다." }
         };
 
         const video = document.getElementById('video');
@@ -151,33 +70,34 @@
         async function startCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment', width: { ideal: 1280 } } 
+                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
                 });
                 video.srcObject = stream;
-            } catch (err) {
-                alert("카메라를 실행할 수 없습니다.");
-            }
+            } catch (err) { alert("카메라 권한 필요"); }
         }
 
         async function captureAndOCR() {
             loading.style.display = 'flex';
-            progressText.innerText = "엔진 가동 중...";
-            
             const ctx = canvas.getContext('2d');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.filter = 'grayscale(1) contrast(2)';
-            ctx.drawImage(video, 0, 0);
+            
+            // 1. 크롭(Crop) 계산: 비디오 상의 가이드 박스 위치 계산
+            const scale = video.videoWidth / video.clientWidth;
+            const cropW = 250 * scale;
+            const cropH = 150 * scale;
+            const cropX = (video.videoWidth - cropW) / 2;
+            const cropY = (video.videoHeight - cropH) / 2;
+
+            canvas.width = cropW;
+            canvas.height = cropH;
+
+            // 2. 전처리: 흑백화 + 대비 + 약간의 어둡게 처리 (글자 윤곽 강조)
+            ctx.filter = 'grayscale(1) contrast(2) brightness(0.9)';
+            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
             
             try {
                 const worker = await Tesseract.createWorker({
-                    logger: m => {
-                        if(m.status === 'recognizing text') {
-                            progressText.innerText = `분석 중: ${Math.round(m.progress * 100)}%`;
-                        }
-                    }
+                    logger: m => { if(m.status === 'recognizing text') progressText.innerText = Math.round(m.progress * 100) + "%"; }
                 });
-
                 await worker.loadLanguage('jpn');
                 await worker.initialize('jpn');
                 const { data: { text } } = await worker.recognize(canvas);
@@ -187,44 +107,22 @@
                 renderKanjis(text);
             } catch (error) {
                 loading.style.display = 'none';
-                alert("인식 오류가 발생했습니다.");
+                alert("분석 실패");
             }
         }
 
         function renderKanjis(text) {
             resultDiv.innerHTML = '';
             const kanjis = text.match(/[\u4e00-\u9faf]/g) || [];
-            
-            if (kanjis.length === 0) {
-                alert("한자를 인식하지 못했습니다. 글씨를 더 크게 비춰주세요!");
-                return;
-            }
+            if (kanjis.length === 0) { alert("중앙 박스 안에 한자를 더 크게 맞춰주세요!"); return; }
 
             [...new Set(kanjis)].forEach(kj => {
                 const btn = document.createElement('button');
                 btn.className = 'kanji-btn';
                 btn.innerText = kj;
-                btn.onclick = () => {
-                    const info = KANJI_DB[kj];
-                    if (info) showModal(kj, info);
-                    else alert(`[${kj}] 정보는 준비 중입니다!`);
-                };
+                btn.onclick = () => alert(KANJI_DB[kj] ? `${kj}: ${KANJI_DB[kj].meaning}` : `${kj} 정보 준비중`);
                 resultDiv.appendChild(btn);
             });
-        }
-
-        function showModal(kj, info) {
-            document.getElementById('modal-kanji').innerText = kj;
-            document.getElementById('modal-meaning').innerText = info.meaning;
-            document.getElementById('modal-level').innerText = info.level;
-            document.getElementById('modal-story').innerText = info.story;
-            document.getElementById('modal-on').innerText = info.on;
-            document.getElementById('modal-kun').innerText = info.kun;
-            document.getElementById('detail-modal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('detail-modal').style.display = 'none';
         }
     </script>
 </body>
