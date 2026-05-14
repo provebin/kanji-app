@@ -11,7 +11,18 @@
         /* 뷰포트 영역 (카메라 & 캡처 화면) */
         .viewport-container { position: relative; flex: 1; min-height: 0; width: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         #video { width: 100%; height: 100%; object-fit: contain; }
-        #cropCanvas { display: none; width: 100%; height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; }
+        .capture-view {
+            display: none; position: absolute; inset: 0; z-index: 2; overflow: hidden; touch-action: none;
+        }
+        .capture-view.is-active { display: block; }
+        .capture-zoom-inner {
+            width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+            transform-origin: center center; will-change: transform;
+        }
+        #cropCanvas {
+            display: none; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain;
+            cursor: crosshair; touch-action: none;
+        }
         
         /* 상태 안내 텍스트 */
         #status-text { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; color: #00ff00; z-index: 10; font-weight: bold; }
@@ -50,9 +61,16 @@
 
         /* 분석 중 오버레이 */
         .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; text-align: center; }
+
+        .app-version {
+            position: fixed; top: 10px; left: 10px; z-index: 11;
+            font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42);
+            letter-spacing: 0.04em; pointer-events: none; user-select: none;
+        }
     </style>
 </head>
 <body>
+    <span id="app-version" class="app-version" aria-label="앱 버전"></span>
     <div id="loading" class="overlay">
         <div>
             <strong style="font-size: 20px; color: #00ff00;">정밀 분석 중...</strong><br><br>
@@ -63,7 +81,11 @@
     <div class="viewport-container">
         <div id="status-text">카메라로 한자를 비춰주세요</div>
         <video id="video" autoplay playsinline></video>
-        <canvas id="cropCanvas"></canvas>
+        <div id="capture-view" class="capture-view">
+            <div id="capture-zoom-inner" class="capture-zoom-inner">
+                <canvas id="cropCanvas"></canvas>
+            </div>
+        </div>
     </div>
 
     <div id="result-panel" class="result-panel">
@@ -84,6 +106,9 @@
     <canvas id="tessCanvas" style="display:none;"></canvas>
 
     <script>
+        /** UI 표시용 — 코드 수정 시마다 패치 버전 올리기 */
+        const APP_VERSION = 'V1.0';
+
         // 한자 DB
         const KANJI_DB = {
             "宿": { "meaning": "숙소/잠잘 숙", "story": "집(宀)에서 사람이 일백(百)번 잠을 자는 곳이 '숙소'입니다." },
@@ -105,6 +130,10 @@
         const resultDiv = document.getElementById('result');
         const resultPanel = document.getElementById('result-panel');
         const resultToggle = document.getElementById('result-toggle');
+        const captureView = document.getElementById('capture-view');
+        const captureZoomInner = document.getElementById('capture-zoom-inner');
+        const appVersionEl = document.getElementById('app-version');
+        if (appVersionEl) appVersionEl.textContent = APP_VERSION;
 
         let isDrawing = false;
         let startX, startY, currentX, currentY;
@@ -115,7 +144,94 @@
         let resizeHandle = null;
         let resizeStartSel = null;
         let moveOffsetX = 0, moveOffsetY = 0;
+        let moveStartSel = null;
         let boundPointerMove, boundPointerUp;
+
+        let captureZoom = 1;
+        let capturePanX = 0, capturePanY = 0;
+        let pinchState = null;
+        let boundPinchMove, boundPinchEnd;
+        let ignoreTouchSelectionUntil = 0;
+
+        function applyCaptureTransform() {
+            captureZoomInner.style.transform = `translate(${capturePanX}px, ${capturePanY}px) scale(${captureZoom})`;
+        }
+
+        function resetCaptureViewTransform() {
+            captureZoom = 1;
+            capturePanX = capturePanY = 0;
+            applyCaptureTransform();
+        }
+
+        function cancelInteractionForPinch() {
+            if (interactionMode === 'move' && moveStartSel) sel = { ...moveStartSel };
+            else if (interactionMode === 'resize' && resizeStartSel) sel = { ...resizeStartSel };
+            isDrawing = false;
+            interactionMode = null;
+            resizeHandle = null;
+            resizeStartSel = null;
+            moveStartSel = null;
+            detachGlobalPointer();
+            paintSelectionLayer();
+        }
+
+        function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+
+        function attachPinchDocumentListeners() {
+            detachPinchDocumentListeners();
+            boundPinchMove = (ev) => { onPinchTouchMove(ev); };
+            boundPinchEnd = (ev) => { onPinchTouchEnd(ev); };
+            document.addEventListener('touchmove', boundPinchMove, { passive: false });
+            document.addEventListener('touchend', boundPinchEnd);
+            document.addEventListener('touchcancel', boundPinchEnd);
+        }
+
+        function detachPinchDocumentListeners() {
+            if (!boundPinchMove) return;
+            document.removeEventListener('touchmove', boundPinchMove);
+            document.removeEventListener('touchend', boundPinchEnd);
+            document.removeEventListener('touchcancel', boundPinchEnd);
+            boundPinchMove = boundPinchEnd = null;
+        }
+
+        function onPinchTouchStart(e) {
+            if (!captureView.classList.contains('is-active')) return;
+            if (!e.touches || e.touches.length < 2) return;
+            e.preventDefault();
+            e.stopPropagation();
+            cancelInteractionForPinch();
+            const t0 = e.touches[0], t1 = e.touches[1];
+            const dx = t1.clientX - t0.clientX, dy = t1.clientY - t0.clientY;
+            const d0 = Math.hypot(dx, dy);
+            if (d0 < 8) return;
+            pinchState = {
+                d0,
+                z0: captureZoom,
+                mid0: { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 },
+                pan0: { x: capturePanX, y: capturePanY }
+            };
+            attachPinchDocumentListeners();
+        }
+
+        function onPinchTouchMove(e) {
+            if (!pinchState || !e.touches || e.touches.length < 2) return;
+            e.preventDefault();
+            const t0 = e.touches[0], t1 = e.touches[1];
+            const d = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+            const mid = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+            captureZoom = clamp(pinchState.z0 * (d / pinchState.d0), 1, 4);
+            capturePanX = pinchState.pan0.x + (mid.x - pinchState.mid0.x);
+            capturePanY = pinchState.pan0.y + (mid.y - pinchState.mid0.y);
+            applyCaptureTransform();
+        }
+
+        function onPinchTouchEnd(e) {
+            if (!pinchState) return;
+            if (e.touches && e.touches.length >= 2) return;
+            detachPinchDocumentListeners();
+            pinchState = null;
+            ignoreTouchSelectionUntil = Date.now() + 220;
+        }
 
         window.onload = () => {
             startCamera();
@@ -123,6 +239,14 @@
                 const collapsed = resultPanel.classList.toggle('collapsed');
                 resultToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
             });
+            captureView.addEventListener('touchstart', onPinchTouchStart, { passive: false, capture: true });
+            captureView.addEventListener('wheel', (e) => {
+                if (!captureView.classList.contains('is-active') || !e.ctrlKey) return;
+                e.preventDefault();
+                const dz = e.deltaY > 0 ? -0.08 : 0.08;
+                captureZoom = clamp(captureZoom + dz, 1, 4);
+                applyCaptureTransform();
+            }, { passive: false });
         };
 
         async function startCamera() {
@@ -140,13 +264,15 @@
             capturedImage.src = cropCanvas.toDataURL('image/png');
 
             video.style.display = 'none';
+            captureView.classList.add('is-active');
             cropCanvas.style.display = 'block';
+            resetCaptureViewTransform();
 
             btnCapture.style.display = 'none';
             btnAnalyze.style.display = 'flex';
             btnRetake.style.display = 'flex';
 
-            statusText.innerText = "손가락으로 인식할 한자를 드래그하세요 (모서리·변으로 크기 조절)";
+            statusText.innerText = "손가락으로 영역 지정 · 두 손가락으로 확대/축소 (Ctrl+휠)";
             statusText.style.color = "#ffc107";
             resultDiv.innerHTML = '';
             hasSelection = false;
@@ -156,9 +282,13 @@
 
         // 2단계: 다시 찍기
         function resetCamera() {
+            detachPinchDocumentListeners();
+            pinchState = null;
+            captureView.classList.remove('is-active');
             cropCanvas.style.display = 'none';
+            resetCaptureViewTransform();
             video.style.display = 'block';
-            
+
             btnCapture.style.display = 'flex';
             btnAnalyze.style.display = 'none';
             btnRetake.style.display = 'none';
@@ -324,6 +454,8 @@
 
         function onPointerDown(e) {
             if (cropCanvas.style.display !== 'block') return;
+            if (e.touches && e.touches.length >= 2) return;
+            if (e.touches && Date.now() < ignoreTouchSelectionUntil) return;
             e.preventDefault();
             const pos = getPos(e);
             const hit = hasSelection && sel ? hitHandle(pos.x, pos.y, sel) : null;
@@ -334,6 +466,7 @@
                 resizeStartSel = { ...sel };
             } else if (hit === 'inside') {
                 interactionMode = 'move';
+                moveStartSel = { ...sel };
                 moveOffsetX = pos.x - sel.x;
                 moveOffsetY = pos.y - sel.y;
             } else {
@@ -387,6 +520,7 @@
             interactionMode = null;
             resizeHandle = null;
             resizeStartSel = null;
+            moveStartSel = null;
             detachGlobalPointer();
             paintSelectionLayer();
         }
