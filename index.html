@@ -9,15 +9,35 @@
         body { margin: 0; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; height: 100vh; height: 100svh; background: #121212; color: white; overflow: hidden; }
         
         /* 뷰포트 영역 (카메라 & 캡처 화면) */
-        .viewport-container { position: relative; flex: 1; width: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        .viewport-container { position: relative; flex: 1; min-height: 0; width: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         #video { width: 100%; height: 100%; object-fit: contain; }
         #cropCanvas { display: none; width: 100%; height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; }
         
         /* 상태 안내 텍스트 */
         #status-text { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; color: #00ff00; z-index: 10; font-weight: bold; }
 
-        /* 결과 및 버튼 */
-        #result { padding: 15px; display: flex; flex-wrap: wrap; gap: 8px; background: #1a1a1a; min-height: 70px; align-items: center; justify-content: center; border-top: 1px solid #333; }
+        /* 추천 한자 패널 (접기/펼치기) */
+        .result-panel {
+            flex-shrink: 0; display: flex; flex-direction: column; background: #1a1a1a;
+            border-top: 1px solid #333; max-height: 42vh; transition: max-height 0.28s ease;
+            min-height: 0;
+        }
+        .result-panel.collapsed { max-height: 46px; }
+        .result-toggle {
+            flex-shrink: 0; width: 100%; padding: 12px 16px; border: none; border-bottom: 1px solid #333;
+            background: #252525; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        }
+        .result-toggle:active { background: #2f2f2f; }
+        .result-toggle .chevron { font-size: 12px; opacity: 0.85; transition: transform 0.2s ease; }
+        .result-panel.collapsed .result-toggle .chevron { transform: rotate(-90deg); }
+        .result-inner {
+            flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 16px;
+            display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; justify-content: center;
+            align-items: center;
+        }
+        .result-panel.collapsed .result-inner { display: none; }
+
         .kanji-btn { padding: 12px 20px; font-size: 26px; border: none; border-radius: 12px; background: #ffffff; color: #121212; font-weight: 900; cursor: pointer; transition: transform 0.1s; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .kanji-btn:active { transform: scale(0.95); }
         
@@ -46,7 +66,13 @@
         <canvas id="cropCanvas"></canvas>
     </div>
 
-    <div id="result"></div>
+    <div id="result-panel" class="result-panel">
+        <button type="button" id="result-toggle" class="result-toggle" aria-expanded="true" aria-controls="result">
+            <span>추천 한자</span>
+            <span class="chevron" aria-hidden="true">▼</span>
+        </button>
+        <div id="result" class="result-inner" role="region" aria-label="인식된 한자 목록"></div>
+    </div>
 
     <div class="controls">
         <button id="btn-capture" class="action-btn" onclick="takePhoto()">📸 사진 찍기</button>
@@ -77,13 +103,27 @@
         const btnAnalyze = document.getElementById('btn-analyze');
         const btnRetake = document.getElementById('btn-retake');
         const resultDiv = document.getElementById('result');
+        const resultPanel = document.getElementById('result-panel');
+        const resultToggle = document.getElementById('result-toggle');
 
         let isDrawing = false;
         let startX, startY, currentX, currentY;
         let capturedImage = new Image();
         let hasSelection = false;
+        let sel = null;
+        let interactionMode = null;
+        let resizeHandle = null;
+        let resizeStartSel = null;
+        let moveOffsetX = 0, moveOffsetY = 0;
+        let boundPointerMove, boundPointerUp;
 
-        window.onload = startCamera;
+        window.onload = () => {
+            startCamera();
+            resultToggle.addEventListener('click', () => {
+                const collapsed = resultPanel.classList.toggle('collapsed');
+                resultToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            });
+        };
 
         async function startCamera() {
             try {
@@ -101,15 +141,17 @@
 
             video.style.display = 'none';
             cropCanvas.style.display = 'block';
-            
+
             btnCapture.style.display = 'none';
             btnAnalyze.style.display = 'flex';
             btnRetake.style.display = 'flex';
-            
-            statusText.innerText = "손가락으로 인식할 한자를 드래그하세요";
+
+            statusText.innerText = "손가락으로 인식할 한자를 드래그하세요 (모서리·변으로 크기 조절)";
             statusText.style.color = "#ffc107";
             resultDiv.innerHTML = '';
             hasSelection = false;
+            sel = null;
+            paintSelectionLayer();
         }
 
         // 2단계: 다시 찍기
@@ -124,61 +166,253 @@
             statusText.innerText = "카메라로 한자를 비춰주세요";
             statusText.style.color = "#00ff00";
             hasSelection = false;
+            sel = null;
+            detachGlobalPointer();
         }
 
-        // --- 터치 및 마우스 드래그 이벤트 (크롭 영역 지정) ---
+        // --- 터치 및 마우스: 영역 지정 / 이동 / 핸들 리사이즈 ---
+        function getClientXY(e) {
+            if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+            return { x: e.clientX, y: e.clientY };
+        }
+
         function getPos(e) {
             const rect = cropCanvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const c = getClientXY(e);
             const scaleX = cropCanvas.width / rect.width;
             const scaleY = cropCanvas.height / rect.height;
-            return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+            return { x: (c.x - rect.left) * scaleX, y: (c.y - rect.top) * scaleY };
         }
 
-        function startDraw(e) {
-            e.preventDefault();
-            const pos = getPos(e);
-            startX = pos.x; startY = pos.y;
-            isDrawing = true; hasSelection = false;
+        function dist2(ax, ay, bx, by) {
+            const dx = ax - bx, dy = ay - by;
+            return dx * dx + dy * dy;
         }
 
-        function draw(e) {
-            if (!isDrawing) return;
-            e.preventDefault();
-            const pos = getPos(e);
-            currentX = pos.x; currentY = pos.y;
+        function distPointToSegment(px, py, x1, y1, x2, y2) {
+            const dx = x2 - x1, dy = y2 - y1;
+            const len2 = dx * dx + dy * dy || 1;
+            let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            const qx = x1 + t * dx, qy = y1 + t * dy;
+            return Math.hypot(px - qx, py - qy);
+        }
 
-            // 원본 이미지 다시 그리기
-            ctx.drawImage(capturedImage, 0, 0);
-            
-            // 어두운 오버레이 씌우기
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+        function handleRadius() {
+            return Math.max(18, Math.min(cropCanvas.width, cropCanvas.height) * 0.028);
+        }
 
-            // 선택 영역 밝게 뚫기
-            const width = currentX - startX;
-            const height = currentY - startY;
-            ctx.clearRect(startX, startY, width, height);
+        function hitHandle(px, py, r) {
+            const pad = handleRadius();
+            const d2 = pad * pad;
+            const corners = [
+                ['nw', r.x, r.y], ['ne', r.x + r.w, r.y],
+                ['se', r.x + r.w, r.y + r.h], ['sw', r.x, r.y + r.h]
+            ];
+            for (const [name, hx, hy] of corners) {
+                if (dist2(px, py, hx, hy) <= d2) return name;
+            }
+            const edges = [
+                ['n', r.x, r.y, r.x + r.w, r.y],
+                ['e', r.x + r.w, r.y, r.x + r.w, r.y + r.h],
+                ['s', r.x + r.w, r.y + r.h, r.x, r.y + r.h],
+                ['w', r.x, r.y + r.h, r.x, r.y]
+            ];
+            for (const [name, x1, y1, x2, y2] of edges) {
+                if (distPointToSegment(px, py, x1, y1, x2, y2) <= pad) return name;
+            }
+            if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return 'inside';
+            return null;
+        }
 
-            // 선택 영역 테두리 그리기
+        function normalizeRect(ax, ay, bx, by) {
+            const x = Math.min(ax, bx), y = Math.min(ay, by);
+            const w = Math.abs(bx - ax), h = Math.abs(by - ay);
+            return { x, y, w, h };
+        }
+
+        function clampRect(r) {
+            const cw = cropCanvas.width, ch = cropCanvas.height;
+            let { x, y, w, h } = r;
+            const minS = 8;
+            x = Math.max(0, Math.min(x, cw - minS));
+            y = Math.max(0, Math.min(y, ch - minS));
+            w = Math.max(minS, Math.min(w, cw - x));
+            h = Math.max(minS, Math.min(h, ch - y));
+            return { x, y, w, h };
+        }
+
+        function applyResizePointer(handle, r0, px, py) {
+            let r;
+            switch (handle) {
+                case 'se': r = normalizeRect(r0.x, r0.y, px, py); break;
+                case 'nw': r = normalizeRect(px, py, r0.x + r0.w, r0.y + r0.h); break;
+                case 'ne': r = normalizeRect(r0.x, r0.y + r0.h, px, py); break;
+                case 'sw': r = normalizeRect(r0.x + r0.w, r0.y, px, py); break;
+                case 'e': r = normalizeRect(r0.x, r0.y, px, r0.y + r0.h); break;
+                case 'w': r = normalizeRect(px, r0.y, r0.x + r0.w, r0.y + r0.h); break;
+                case 'n': r = normalizeRect(r0.x, py, r0.x + r0.w, r0.y + r0.h); break;
+                case 's': r = normalizeRect(r0.x, r0.y, r0.x + r0.w, py); break;
+                default: r = { ...r0 };
+            }
+            return clampRect(r);
+        }
+
+        function getDisplayRect() {
+            if (interactionMode === 'create' && isDrawing) {
+                return normalizeRect(startX, startY, currentX, currentY);
+            }
+            if (sel) return { ...sel };
+            return null;
+        }
+
+        function paintSelectionLayer() {
+            if (!capturedImage.complete || capturedImage.naturalWidth === 0) return;
+            ctx.drawImage(capturedImage, 0, 0, cropCanvas.width, cropCanvas.height);
+            const r = getDisplayRect();
+            if (!r || r.w < 2 || r.h < 2) return;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+            ctx.fillRect(r.x, r.y, r.w, r.h);
+
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(startX, startY, width, height);
-            hasSelection = true;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+            if (hasSelection && sel && !(interactionMode === 'create' && isDrawing)) {
+                drawResizeHandles(r);
+            }
         }
 
-        function endDraw(e) {
+        function drawResizeHandles(r) {
+            const hr = Math.max(10, handleRadius() * 0.55);
+            const pts = [
+                [r.x, r.y], [r.x + r.w / 2, r.y], [r.x + r.w, r.y],
+                [r.x + r.w, r.y + r.h / 2], [r.x + r.w, r.y + r.h],
+                [r.x + r.w / 2, r.y + r.h], [r.x, r.y + r.h], [r.x, r.y + r.h / 2]
+            ];
+            ctx.fillStyle = '#00ff00';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+            ctx.lineWidth = 1;
+            for (const [hx, hy] of pts) {
+                ctx.beginPath();
+                ctx.rect(hx - hr, hy - hr, hr * 2, hr * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+
+        function detachGlobalPointer() {
+            if (!boundPointerMove) return;
+            document.removeEventListener('mousemove', boundPointerMove);
+            document.removeEventListener('mouseup', boundPointerUp);
+            document.removeEventListener('touchmove', boundPointerMove);
+            document.removeEventListener('touchend', boundPointerUp);
+            boundPointerMove = boundPointerUp = null;
+        }
+
+        function attachGlobalPointer() {
+            detachGlobalPointer();
+            boundPointerMove = (ev) => { onPointerMove(ev); };
+            boundPointerUp = (ev) => { onPointerUp(ev); };
+            document.addEventListener('mousemove', boundPointerMove);
+            document.addEventListener('mouseup', boundPointerUp);
+            document.addEventListener('touchmove', boundPointerMove, { passive: false });
+            document.addEventListener('touchend', boundPointerUp);
+        }
+
+        function onPointerDown(e) {
+            if (cropCanvas.style.display !== 'block') return;
             e.preventDefault();
-            isDrawing = false;
+            const pos = getPos(e);
+            const hit = hasSelection && sel ? hitHandle(pos.x, pos.y, sel) : null;
+
+            if (hit && hit !== 'inside') {
+                interactionMode = 'resize';
+                resizeHandle = hit;
+                resizeStartSel = { ...sel };
+            } else if (hit === 'inside') {
+                interactionMode = 'move';
+                moveOffsetX = pos.x - sel.x;
+                moveOffsetY = pos.y - sel.y;
+            } else {
+                interactionMode = 'create';
+                isDrawing = true;
+                startX = currentX = pos.x;
+                startY = currentY = pos.y;
+                hasSelection = false;
+                sel = null;
+            }
+            attachGlobalPointer();
+            paintSelectionLayer();
         }
 
-        cropCanvas.addEventListener('mousedown', startDraw);
-        cropCanvas.addEventListener('mousemove', draw);
-        cropCanvas.addEventListener('mouseup', endDraw);
-        cropCanvas.addEventListener('touchstart', startDraw, {passive: false});
-        cropCanvas.addEventListener('touchmove', draw, {passive: false});
-        cropCanvas.addEventListener('touchend', endDraw);
+        function onPointerMove(e) {
+            if (!interactionMode) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            if (interactionMode === 'create' && isDrawing) {
+                currentX = pos.x;
+                currentY = pos.y;
+            } else if (interactionMode === 'move' && sel) {
+                let nx = pos.x - moveOffsetX;
+                let ny = pos.y - moveOffsetY;
+                nx = Math.max(0, Math.min(nx, cropCanvas.width - sel.w));
+                ny = Math.max(0, Math.min(ny, cropCanvas.height - sel.h));
+                sel = { ...sel, x: nx, y: ny };
+            } else if (interactionMode === 'resize' && resizeStartSel) {
+                sel = applyResizePointer(resizeHandle, resizeStartSel, pos.x, pos.y);
+            }
+            paintSelectionLayer();
+        }
+
+        function onPointerUp(e) {
+            e.preventDefault();
+            if (interactionMode === 'create' && isDrawing) {
+                isDrawing = false;
+                const r0 = normalizeRect(startX, startY, currentX, currentY);
+                if (r0.w < 8 || r0.h < 8) {
+                    sel = null;
+                    hasSelection = false;
+                } else {
+                    sel = clampRect(r0);
+                    hasSelection = true;
+                }
+            } else if (interactionMode === 'resize' || interactionMode === 'move') {
+                if (sel) sel = clampRect(sel);
+                hasSelection = !!(sel && sel.w >= 8 && sel.h >= 8);
+                if (!hasSelection) sel = null;
+            }
+            interactionMode = null;
+            resizeHandle = null;
+            resizeStartSel = null;
+            detachGlobalPointer();
+            paintSelectionLayer();
+        }
+
+        function updateHoverCursor(e) {
+            if (cropCanvas.style.display !== 'block' || !sel || interactionMode) {
+                cropCanvas.style.cursor = 'crosshair';
+                return;
+            }
+            const pos = getPos(e);
+            const h = hitHandle(pos.x, pos.y, sel);
+            const map = {
+                nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+                n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+                inside: 'move'
+            };
+            cropCanvas.style.cursor = map[h] || 'crosshair';
+        }
+
+        cropCanvas.addEventListener('mousedown', onPointerDown);
+        cropCanvas.addEventListener('mousemove', updateHoverCursor);
+        cropCanvas.addEventListener('touchstart', onPointerDown, { passive: false });
+
+        capturedImage.onload = () => {
+            if (cropCanvas.style.display === 'block') paintSelectionLayer();
+        };
 
         /** 그레이스케일 + 히스토그램 스트레치 (조명·반사 편차 완화) */
         function buildStretchedGrayscale(imageData) {
@@ -269,16 +503,15 @@
 
         // 3단계: 선택 영역 전처리 및 OCR 분석
         async function processSelection() {
-            if (!hasSelection) { alert("먼저 손가락으로 드래그하여 한자 영역을 선택해주세요!"); return; }
+            if (!hasSelection || !sel) { alert("먼저 손가락으로 드래그하여 한자 영역을 선택해주세요!"); return; }
 
             document.getElementById('loading').style.display = 'flex';
             document.getElementById('progress').innerText = "영역 추출 중...";
 
-            // 좌상단 좌표와 너비/높이 절대값 계산 (반대로 드래그했을 경우 대비)
-            const x = Math.min(startX, currentX);
-            const y = Math.min(startY, currentY);
-            const w = Math.abs(currentX - startX);
-            const h = Math.abs(currentY - startY);
+            const x = sel.x;
+            const y = sel.y;
+            const w = sel.w;
+            const h = sel.h;
 
             if (w < 8 || h < 8) {
                 document.getElementById('loading').style.display = 'none';
@@ -320,6 +553,8 @@
 
         function renderKanjis(text) {
             resultDiv.innerHTML = '';
+            resultPanel.classList.remove('collapsed');
+            resultToggle.setAttribute('aria-expanded', 'true');
             const kanjis = text.match(/[\u4e00-\u9faf]/g) || [];
             if (kanjis.length === 0) { 
                 alert("인식된 한자가 없습니다. 영역을 글자에 딱 맞게 다시 지정해주세요!"); 
