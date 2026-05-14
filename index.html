@@ -90,9 +90,37 @@
             canvas.width = cropW;
             canvas.height = cropH;
 
-            // 2. 전처리: 흑백화 + 대비 + 약간의 어둡게 처리 (글자 윤곽 강조)
-            ctx.filter = 'grayscale(1) contrast(2) brightness(0.9)';
-            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            // 1. 일단 잘라낸 영상을 캔버스에 있는 그대로 그립니다 (필터 없음).
+ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+// 2. 캔버스의 모든 픽셀 데이터를 긁어옵니다. (R, G, B, Alpha 값이 1열로 늘어선 거대한 배열)
+const imageData = ctx.getImageData(0, 0, cropW, cropH);
+const data = imageData.data;
+
+// 3. 이진화 임계값(Threshold) 설정 (0~255)
+// 빛 반사나 그림자에 따라 조절 가능합니다. 숫자가 높을수록 글자가 더 두꺼워지고 검어집니다.
+const threshold = 110; 
+
+// 4. 수만 개의 픽셀을 0.01초 만에 해부하여 강제 흑백 처리합니다.
+for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    // 인간의 눈이 인식하는 밝기 공식에 따라 현재 픽셀의 명도를 계산합니다.
+    const grayscale = 0.299 * r + 0.587 * g + 0.114 * b;
+    
+    // 명도가 임계값보다 밝으면 완전한 흰색(255), 어두우면(글자면) 완전한 검은색(0)으로 덮어씁니다.
+    const color = grayscale > threshold ? 255 : 0;
+    
+    data[i] = color;     // Red
+    data[i + 1] = color; // Green
+    data[i + 2] = color; // Blue
+    // data[i+3]은 투명도(Alpha)이므로 그대로 둡니다.
+}
+
+// 5. 조작이 완료된 순백/칠흑 데이터를 캔버스에 다시 꽂아 넣습니다.
+ctx.putImageData(imageData, 0, 0);
             
             try {
                 const worker = await Tesseract.createWorker({
