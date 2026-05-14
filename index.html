@@ -2,11 +2,31 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Masaaki Kanji OCR - Precision Pro v3</title>
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js'></script>
     <style>
-        body { margin: 0; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; height: 100vh; height: 100svh; background: #121212; color: white; overflow: hidden; }
+        html { height: 100%; -webkit-text-size-adjust: 100%; }
+        body {
+            margin: 0;
+            font-family: -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            min-height: 100dvh;
+            min-height: -webkit-fill-available;
+            max-height: 100vh;
+            max-height: 100dvh;
+            max-height: -webkit-fill-available;
+            height: 100%;
+            background: #121212;
+            color: white;
+            overflow: hidden;
+            box-sizing: border-box;
+            padding-left: env(safe-area-inset-left, 0px);
+            padding-right: env(safe-area-inset-right, 0px);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
         
         /* 뷰포트 영역 (카메라 & 캡처 화면) */
         .viewport-container { position: relative; flex: 1; min-height: 0; width: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
@@ -25,13 +45,23 @@
         }
         
         /* 상태 안내 텍스트 */
-        #status-text { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; color: #00ff00; z-index: 10; font-weight: bold; }
+        #status-text {
+            position: absolute;
+            top: max(20px, env(safe-area-inset-top, 0px));
+            left: 50%;
+            transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; font-size: 14px; color: #00ff00; z-index: 10; font-weight: bold; }
 
         /* 추천 한자 패널 (접기/펼치기) */
         .result-panel {
-            flex-shrink: 0; display: flex; flex-direction: column; background: #1a1a1a;
-            border-top: 1px solid #333; max-height: 42vh; transition: max-height 0.28s ease;
+            flex: 0 1 auto;
+            flex-shrink: 1;
             min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            max-height: min(42vh, 38dvh);
+            transition: max-height 0.28s ease;
         }
         .result-panel.collapsed { max-height: 46px; }
         .result-toggle {
@@ -52,7 +82,15 @@
         .kanji-btn { padding: 12px 20px; font-size: 26px; border: none; border-radius: 12px; background: #ffffff; color: #121212; font-weight: 900; cursor: pointer; transition: transform 0.1s; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         .kanji-btn:active { transform: scale(0.95); }
         
-        .controls { padding: 15px 20px 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #2d2d2d; border-radius: 24px 24px 0 0; }
+        .controls {
+            flex-shrink: 0;
+            padding: 12px max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-right, 0px));
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            background: #2d2d2d;
+            border-radius: 24px 24px 0 0;
+        }
         button.action-btn { padding: 16px; font-size: 16px; border: none; border-radius: 14px; color: white; font-weight: bold; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px; }
         
         #btn-capture { background: #007bff; grid-column: span 2; }
@@ -63,7 +101,10 @@
         .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); color: white; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; text-align: center; }
 
         .app-version {
-            position: fixed; top: 10px; left: 10px; z-index: 11;
+            position: fixed;
+            top: max(10px, env(safe-area-inset-top, 0px));
+            left: max(10px, env(safe-area-inset-left, 0px));
+            z-index: 11;
             font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42);
             letter-spacing: 0.04em; pointer-events: none; user-select: none;
         }
@@ -107,7 +148,7 @@
 
     <script>
         /** UI 표시용 — 코드 수정 시마다 패치 버전 올리기 */
-        const APP_VERSION = 'V1.0';
+        const APP_VERSION = 'V1.4';
 
         // 한자 DB
         const KANJI_DB = {
@@ -548,6 +589,126 @@
             if (cropCanvas.style.display === 'block') paintSelectionLayer();
         };
 
+        /** 좌·우 가장자리의 세로 괄호/세로 막대(잉크 비율 높은 열)를 흰색으로 — [皮] 등에서 괄호 간섭 완화 */
+        function suppressBracketColumns(imageData, iw, ih) {
+            const data = imageData.data;
+            const n = iw * ih;
+            const gray = new Uint8Array(n);
+            for (let i = 0, p = 0; i < n; i++, p += 4) {
+                gray[i] = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) | 0;
+            }
+            const strip = Math.max(2, Math.min(28, Math.ceil(iw * 0.16)));
+            const ink = (g) => (g < 215 ? 1 : 0);
+            function colRatio(cx) {
+                let s = 0;
+                for (let y = 0; y < ih; y++) s += ink(gray[y * iw + cx]);
+                return s / ih;
+            }
+            function paintCol(cx) {
+                for (let y = 0; y < ih; y++) {
+                    const p = (y * iw + cx) * 4;
+                    data[p] = data[p + 1] = data[p + 2] = 255;
+                    data[p + 3] = 255;
+                }
+            }
+            for (let cx = 0; cx < Math.min(strip, iw); cx++) {
+                if (colRatio(cx) > 0.48) paintCol(cx);
+            }
+            for (let cx = Math.max(0, iw - strip); cx < iw; cx++) {
+                if (colRatio(cx) > 0.48) paintCol(cx);
+            }
+        }
+
+        /** 그라데이션·컬러 글자에 강한 max(R,G,B) 기반 그레이 + 스트레치 */
+        function buildStretchedMaxChannel(imageData) {
+            const { data, width: iw, height: ih } = imageData;
+            const n = iw * ih;
+            const gray = new Uint8Array(n);
+            let min = 255, max = 0;
+            for (let i = 0, p = 0; i < n; i++, p += 4) {
+                const g = Math.max(data[p], data[p + 1], data[p + 2]);
+                gray[i] = g;
+                if (g < min) min = g;
+                if (g > max) max = g;
+            }
+            const range = max - min || 1;
+            for (let i = 0; i < n; i++) {
+                gray[i] = (((gray[i] - min) / range) * 255) | 0;
+            }
+            return gray;
+        }
+
+        /** 히스토그램 평활화 — 그라데이션 대비 펴기 */
+        function equalizeGrayInPlace(gray, len) {
+            const hist = new Uint32Array(256);
+            for (let i = 0; i < len; i++) hist[gray[i]]++;
+            const cdf = new Uint32Array(256);
+            cdf[0] = hist[0];
+            for (let i = 1; i < 256; i++) cdf[i] = cdf[i - 1] + hist[i];
+            let lo = 0;
+            for (; lo < 256; lo++) if (cdf[lo] > 0) break;
+            const denom = len - cdf[lo];
+            if (denom <= 0) return;
+            for (let i = 0; i < len; i++) {
+                gray[i] = (((cdf[gray[i]] - cdf[lo]) * 255) / denom) | 0;
+            }
+        }
+
+        /** 밝은 획/연한 글자용 역이진 */
+        function binarizeWithOtsuInverted(imageData, gray) {
+            const thr = otsuThreshold(gray, gray.length);
+            const data = imageData.data;
+            for (let i = 0; i < gray.length; i++) {
+                const v = gray[i] > thr ? 0 : 255;
+                const p = i * 4;
+                data[p] = data[p + 1] = data[p + 2] = v;
+                data[p + 3] = 255;
+            }
+        }
+
+        /** 획 단절 보완 (3×3 팽창 후 침식 1회) */
+        function morphCloseBinary3(imageData, iw, ih) {
+            const data = imageData.data;
+            const n = iw * ih;
+            const ink = new Uint8Array(n);
+            for (let i = 0; i < n; i++) {
+                const p = i * 4;
+                ink[i] = data[p] < 128 ? 1 : 0;
+            }
+            const tmp = new Uint8Array(n);
+            for (let y = 0; y < ih; y++) {
+                for (let x = 0; x < iw; x++) {
+                    let m = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nx = x + dx, ny = y + dy;
+                            if (nx >= 0 && nx < iw && ny >= 0 && ny < ih) {
+                                m = Math.max(m, ink[ny * iw + nx]);
+                            }
+                        }
+                    }
+                    tmp[y * iw + x] = m;
+                }
+            }
+            for (let y = 0; y < ih; y++) {
+                for (let x = 0; x < iw; x++) {
+                    let m = 1;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nx = x + dx, ny = y + dy;
+                            if (nx >= 0 && nx < iw && ny >= 0 && ny < ih) {
+                                m = Math.min(m, tmp[ny * iw + nx]);
+                            }
+                        }
+                    }
+                    const v = m ? 0 : 255;
+                    const p = (y * iw + x) * 4;
+                    data[p] = data[p + 1] = data[p + 2] = v;
+                    data[p + 3] = 255;
+                }
+            }
+        }
+
         /** 그레이스케일 + 히스토그램 스트레치 (조명·반사 편차 완화) */
         function buildStretchedGrayscale(imageData) {
             const { data, width: iw, height: ih } = imageData;
@@ -602,21 +763,20 @@
             }
         }
 
-        /** 이진화 → 짧은 변 기준 업스케일 + 흰 여백 (Tesseract가 작은 글자에 강해짐) */
-        function prepareOcrImage(sourceImage, sx, sy, sw, sh, outCanvas) {
-            if (sw < 1 || sh < 1) return false;
-            const binCanvas = document.createElement('canvas');
-            binCanvas.width = sw;
-            binCanvas.height = sh;
-            const bCtx = binCanvas.getContext('2d');
-            bCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
-            const imageData = bCtx.getImageData(0, 0, sw, sh);
-            const gray = buildStretchedGrayscale(imageData);
-            binarizeWithOtsu(imageData, gray);
-            bCtx.putImageData(imageData, 0, 0);
+        function writeGrayToRgba(imageData, gray) {
+            const data = imageData.data;
+            for (let i = 0; i < gray.length; i++) {
+                const v = gray[i];
+                const p = i * 4;
+                data[p] = data[p + 1] = data[p + 2] = v;
+                data[p + 3] = 255;
+            }
+        }
 
+        /** 짧은 변 기준 업스케일 + 흰 여백 */
+        function scalePadOnto(binCanvas, sw, sh, outCanvas) {
             const minSide = Math.min(sw, sh);
-            const targetMin = 144;
+            const targetMin = 176;
             let scale = 1;
             if (minSide < targetMin) {
                 scale = Math.min(4, targetMin / minSide);
@@ -624,7 +784,6 @@
             const scaledW = Math.max(1, Math.round(sw * scale));
             const scaledH = Math.max(1, Math.round(sh * scale));
             const pad = Math.max(16, Math.round(Math.min(scaledW, scaledH) * 0.12));
-
             const tCtx = outCanvas.getContext('2d');
             outCanvas.width = scaledW + pad * 2;
             outCanvas.height = scaledH + pad * 2;
@@ -632,8 +791,63 @@
             tCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
             tCtx.imageSmoothingEnabled = false;
             tCtx.drawImage(binCanvas, 0, 0, sw, sh, pad, pad, scaledW, scaledH);
+        }
+
+        /**
+         * variant: gray | gray_bracket | maxGray | eqGray_bracket | otsu_bracket | otsu_inv | otsu_close_bracket
+         * 괄호·그라데이션 대응: 가장자리 열 제거 / max채널 / 평활화 / 이진·역이진·closing
+         */
+        function prepareOcrVariant(sourceImage, sx, sy, sw, sh, outCanvas, variant) {
+            if (sw < 1 || sh < 1) return false;
+            const work = document.createElement('canvas');
+            work.width = sw;
+            work.height = sh;
+            const wctx = work.getContext('2d');
+            wctx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
+            const imageData = wctx.getImageData(0, 0, sw, sh);
+            if (variant.endsWith('_bracket')) {
+                suppressBracketColumns(imageData, sw, sh);
+            }
+            const base = variant.replace(/_bracket$/, '');
+
+            if (base === 'gray') {
+                const gray = buildStretchedGrayscale(imageData);
+                writeGrayToRgba(imageData, gray);
+            } else if (base === 'maxGray') {
+                const gray = buildStretchedMaxChannel(imageData);
+                writeGrayToRgba(imageData, gray);
+            } else if (base === 'eqGray') {
+                const gray = buildStretchedGrayscale(imageData);
+                equalizeGrayInPlace(gray, gray.length);
+                writeGrayToRgba(imageData, gray);
+            } else if (base === 'otsu') {
+                const gray = buildStretchedGrayscale(imageData);
+                binarizeWithOtsu(imageData, gray);
+            } else if (base === 'otsu_inv') {
+                const gray = buildStretchedGrayscale(imageData);
+                binarizeWithOtsuInverted(imageData, gray);
+            } else if (base === 'otsu_close') {
+                const gray = buildStretchedGrayscale(imageData);
+                binarizeWithOtsu(imageData, gray);
+                morphCloseBinary3(imageData, sw, sh);
+            } else {
+                return false;
+            }
+            wctx.putImageData(imageData, 0, 0);
+            scalePadOnto(work, sw, sh, outCanvas);
             return true;
         }
+
+        const OCR_VARIANTS = [
+            'gray',
+            'gray_bracket',
+            'maxGray',
+            'maxGray_bracket',
+            'eqGray_bracket',
+            'otsu_bracket',
+            'otsu_inv',
+            'otsu_close_bracket'
+        ];
 
         // 3단계: 선택 영역 전처리 및 OCR 분석
         async function processSelection() {
@@ -657,28 +871,37 @@
                 alert("캡처 이미지를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.");
                 return;
             }
-            if (!prepareOcrImage(capturedImage, x, y, w, h, tessCanvas)) {
-                document.getElementById('loading').style.display = 'none';
-                alert("영역 처리에 실패했습니다. 다시 선택해 주세요.");
-                return;
-            }
 
             try {
                 document.getElementById('progress').innerText = "0%";
                 const worker = await Tesseract.createWorker({
-                    logger: m => { if(m.status === 'recognizing text') document.getElementById('progress').innerText = Math.round(m.progress * 100) + "%"; }
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            document.getElementById('progress').innerText = Math.round(m.progress * 100) + "%";
+                        }
+                    }
                 });
                 await worker.loadLanguage('jpn+jpn_vert');
                 await worker.initialize('jpn+jpn_vert');
                 await worker.setParameters({
                     tessedit_pageseg_mode: '11',
-                    user_defined_dpi: '240'
+                    user_defined_dpi: '280'
                 });
-                const { data: { text } } = await worker.recognize(tessCanvas);
+
+                let mergedText = '';
+                const nVar = OCR_VARIANTS.length;
+                for (let i = 0; i < nVar; i++) {
+                    document.getElementById('progress').innerText = `전처리 ${i + 1}/${nVar}…`;
+                    if (!prepareOcrVariant(capturedImage, x, y, w, h, tessCanvas, OCR_VARIANTS[i])) {
+                        continue;
+                    }
+                    const { data: { text } } = await worker.recognize(tessCanvas);
+                    mergedText += (text || '') + '\n';
+                }
                 await worker.terminate();
-                
+
                 document.getElementById('loading').style.display = 'none';
-                renderKanjis(text);
+                renderKanjis(mergedText);
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
                 alert("분석 실패. 다른 이미지를 시도해 주세요.");
@@ -689,7 +912,7 @@
             resultDiv.innerHTML = '';
             resultPanel.classList.remove('collapsed');
             resultToggle.setAttribute('aria-expanded', 'true');
-            const kanjis = text.match(/[\u4e00-\u9faf]/g) || [];
+            const kanjis = text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) || [];
             if (kanjis.length === 0) { 
                 alert("인식된 한자가 없습니다. 영역을 글자에 딱 맞게 다시 지정해주세요!"); 
                 return; 
