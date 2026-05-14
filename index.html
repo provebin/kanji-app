@@ -180,7 +180,94 @@
         cropCanvas.addEventListener('touchmove', draw, {passive: false});
         cropCanvas.addEventListener('touchend', endDraw);
 
-        // 3단계: 선택 영역 이진화 및 OCR 분석
+        /** 그레이스케일 + 히스토그램 스트레치 (조명·반사 편차 완화) */
+        function buildStretchedGrayscale(imageData) {
+            const { data, width: iw, height: ih } = imageData;
+            const n = iw * ih;
+            const gray = new Uint8Array(n);
+            let min = 255, max = 0;
+            for (let i = 0, p = 0; i < n; i++, p += 4) {
+                const g = (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]) | 0;
+                gray[i] = g;
+                if (g < min) min = g;
+                if (g > max) max = g;
+            }
+            const range = max - min || 1;
+            for (let i = 0; i < n; i++) {
+                gray[i] = (((gray[i] - min) / range) * 255) | 0;
+            }
+            return gray;
+        }
+
+        /** Otsu 자동 임계값 (고정 110보다 간판·메뉴에 유리) */
+        function otsuThreshold(gray, len) {
+            const hist = new Uint32Array(256);
+            for (let i = 0; i < len; i++) hist[gray[i]]++;
+            let sum = 0;
+            for (let i = 0; i < 256; i++) sum += i * hist[i];
+            let sumB = 0, wB = 0, maxVar = 0, threshold = 127;
+            for (let t = 0; t < 256; t++) {
+                wB += hist[t];
+                if (wB === 0) continue;
+                const wF = len - wB;
+                if (wF === 0) break;
+                sumB += t * hist[t];
+                const mB = sumB / wB;
+                const mF = (sum - sumB) / wF;
+                const between = wB * wF * (mB - mF) * (mB - mF);
+                if (between >= maxVar) {
+                    maxVar = between;
+                    threshold = t;
+                }
+            }
+            return threshold;
+        }
+
+        function binarizeWithOtsu(imageData, gray) {
+            const thr = otsuThreshold(gray, gray.length);
+            const data = imageData.data;
+            for (let i = 0; i < gray.length; i++) {
+                const v = gray[i] > thr ? 255 : 0;
+                const p = i * 4;
+                data[p] = data[p + 1] = data[p + 2] = v;
+                data[p + 3] = 255;
+            }
+        }
+
+        /** 이진화 → 짧은 변 기준 업스케일 + 흰 여백 (Tesseract가 작은 글자에 강해짐) */
+        function prepareOcrImage(sourceImage, sx, sy, sw, sh, outCanvas) {
+            if (sw < 1 || sh < 1) return false;
+            const binCanvas = document.createElement('canvas');
+            binCanvas.width = sw;
+            binCanvas.height = sh;
+            const bCtx = binCanvas.getContext('2d');
+            bCtx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
+            const imageData = bCtx.getImageData(0, 0, sw, sh);
+            const gray = buildStretchedGrayscale(imageData);
+            binarizeWithOtsu(imageData, gray);
+            bCtx.putImageData(imageData, 0, 0);
+
+            const minSide = Math.min(sw, sh);
+            const targetMin = 144;
+            let scale = 1;
+            if (minSide < targetMin) {
+                scale = Math.min(4, targetMin / minSide);
+            }
+            const scaledW = Math.max(1, Math.round(sw * scale));
+            const scaledH = Math.max(1, Math.round(sh * scale));
+            const pad = Math.max(16, Math.round(Math.min(scaledW, scaledH) * 0.12));
+
+            const tCtx = outCanvas.getContext('2d');
+            outCanvas.width = scaledW + pad * 2;
+            outCanvas.height = scaledH + pad * 2;
+            tCtx.fillStyle = '#ffffff';
+            tCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+            tCtx.imageSmoothingEnabled = false;
+            tCtx.drawImage(binCanvas, 0, 0, sw, sh, pad, pad, scaledW, scaledH);
+            return true;
+        }
+
+        // 3단계: 선택 영역 전처리 및 OCR 분석
         async function processSelection() {
             if (!hasSelection) { alert("먼저 손가락으로 드래그하여 한자 영역을 선택해주세요!"); return; }
 
@@ -193,23 +280,21 @@
             const w = Math.abs(currentX - startX);
             const h = Math.abs(currentY - startY);
 
-            tessCanvas.width = w;
-            tessCanvas.height = h;
-            const tCtx = tessCanvas.getContext('2d');
-            
-            // 선택한 영역만 복사해서 보이지 않는 캔버스에 그리기
-            tCtx.drawImage(capturedImage, x, y, w, h, 0, 0, w, h);
-
-            // [정밀 픽셀 이진화 엔진]
-            const imageData = tCtx.getImageData(0, 0, w, h);
-            const data = imageData.data;
-            const threshold = 110;
-            for (let i = 0; i < data.length; i += 4) {
-                const grayscale = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                const color = grayscale > threshold ? 255 : 0;
-                data[i] = color; data[i+1] = color; data[i+2] = color;
+            if (w < 8 || h < 8) {
+                document.getElementById('loading').style.display = 'none';
+                alert("영역이 너무 작습니다. 글자를 조금 더 넓게 드래그해 주세요.");
+                return;
             }
-            tCtx.putImageData(imageData, 0, 0);
+            if (!capturedImage.complete || capturedImage.naturalWidth === 0) {
+                document.getElementById('loading').style.display = 'none';
+                alert("캡처 이미지를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.");
+                return;
+            }
+            if (!prepareOcrImage(capturedImage, x, y, w, h, tessCanvas)) {
+                document.getElementById('loading').style.display = 'none';
+                alert("영역 처리에 실패했습니다. 다시 선택해 주세요.");
+                return;
+            }
 
             try {
                 document.getElementById('progress').innerText = "0%";
@@ -218,6 +303,10 @@
                 });
                 await worker.loadLanguage('jpn+jpn_vert');
                 await worker.initialize('jpn+jpn_vert');
+                await worker.setParameters({
+                    tessedit_pageseg_mode: '11',
+                    user_defined_dpi: '240'
+                });
                 const { data: { text } } = await worker.recognize(tessCanvas);
                 await worker.terminate();
                 
