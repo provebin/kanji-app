@@ -268,10 +268,19 @@
         <div class="modal-content"
             style="background: #1e1e1e; padding: 24px; border-radius: 16px; width: 85%; max-width: 400px; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #333;"
             onclick="event.stopPropagation()">
-            <h2 id="modal-title" style="margin-top: 0; color: #00ff00; font-size: 28px;"></h2>
-            <p id="modal-meaning" style="font-size: 18px; font-weight: bold; margin-bottom: 16px;"></p>
-            <p style="font-size: 14px; color: #aaa; margin-bottom: 8px;">💡 딥다이브 연상 스토리:</p>
-            <p id="modal-story" style="font-size: 15px; line-height: 1.5; color: #fff; margin-top: 0;"></p>
+            <h2 id="modal-title" style="margin-top: 0; color: #00ff00; font-size: 28px; margin-bottom: 16px;"></h2>
+            <div style="font-size: 15px; line-height: 1.6; color: #fff;">
+                <p style="margin: 0 0 8px 0;"><span style="color: #aaa;">의미 :</span> <span id="modal-meaning"
+                        style="font-weight: bold;"></span></p>
+                <p style="margin: 0 0 8px 0;" id="modal-on-container"><span style="color: #aaa;">음독 :</span> <span
+                        id="modal-on"></span></p>
+                <p style="margin: 0 0 8px 0;" id="modal-kun-container"><span style="color: #aaa;">훈독 :</span> <span
+                        id="modal-kun"></span></p>
+                <p style="margin: 0 0 8px 0;" id="modal-comp-container"><span style="color: #aaa;">한자구성 :</span> <span
+                        id="modal-comp"></span></p>
+                <p style="margin: 0 0 4px 0;"><span style="color: #aaa;">한자해설 :</span></p>
+                <p id="modal-story" style="margin: 0;"></p>
+            </div>
             <div id="modal-link-container" style="margin-top: 20px; text-align: right;"></div>
             <button onclick="closeModal()" class="action-btn"
                 style="width: 100%; background: #333; margin-top: 24px; padding: 12px; font-size: 16px;">닫기</button>
@@ -1202,22 +1211,55 @@
             const modal = document.getElementById('info-modal');
             const titleEl = document.getElementById('modal-title');
             const meaningEl = document.getElementById('modal-meaning');
+            const onEl = document.getElementById('modal-on');
+            const kunEl = document.getElementById('modal-kun');
+            const compEl = document.getElementById('modal-comp');
             const storyEl = document.getElementById('modal-story');
+
+            const onContainer = document.getElementById('modal-on-container');
+            const kunContainer = document.getElementById('modal-kun-container');
+            const compContainer = document.getElementById('modal-comp-container');
             const linkContainer = document.getElementById('modal-link-container');
 
             titleEl.innerText = `【 ${kj} 】`;
 
             if (KANJI_DB[kj]) {
-                meaningEl.innerText = KANJI_DB[kj].meaning;
-                storyEl.innerText = KANJI_DB[kj].story;
+                const db = KANJI_DB[kj];
+                meaningEl.innerText = db.meaning || "";
 
-                if (KANJI_DB[kj].link) {
-                    linkContainer.innerHTML = `<a href="${KANJI_DB[kj].link}" target="_blank" style="color: #4da6ff; text-decoration: underline; font-weight: bold; font-size: 16px;">[상세정보]</a>`;
+                if (db.on) {
+                    onEl.innerText = db.on;
+                    onContainer.style.display = "block";
+                } else {
+                    onContainer.style.display = "none";
+                }
+
+                if (db.kun) {
+                    kunEl.innerText = db.kun;
+                    kunContainer.style.display = "block";
+                } else {
+                    kunContainer.style.display = "none";
+                }
+
+                if (db.composition) {
+                    compEl.innerText = db.composition;
+                    compContainer.style.display = "block";
+                } else {
+                    compContainer.style.display = "none";
+                }
+
+                storyEl.innerText = db.story || "";
+
+                if (db.link) {
+                    linkContainer.innerHTML = `<a href="${db.link}" target="_blank" style="color: #4da6ff; text-decoration: underline; font-weight: bold; font-size: 16px;">[상세정보]</a>`;
                 } else {
                     linkContainer.innerHTML = '';
                 }
             } else {
                 meaningEl.innerText = "정보 준비 중...";
+                onContainer.style.display = "none";
+                kunContainer.style.display = "none";
+                compContainer.style.display = "none";
                 storyEl.innerText = "아직 DB에 업데이트되지 않은 한자입니다.";
                 linkContainer.innerHTML = '';
             }
