@@ -265,13 +265,16 @@
 
     <!-- 커스텀 모달 팝업 -->
     <div id="info-modal" class="overlay" style="display: none; z-index: 2000;" onclick="closeModal(event)">
-        <div class="modal-content" style="background: #1e1e1e; padding: 24px; border-radius: 16px; width: 85%; max-width: 400px; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #333;" onclick="event.stopPropagation()">
+        <div class="modal-content"
+            style="background: #1e1e1e; padding: 24px; border-radius: 16px; width: 85%; max-width: 400px; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #333;"
+            onclick="event.stopPropagation()">
             <h2 id="modal-title" style="margin-top: 0; color: #00ff00; font-size: 28px;"></h2>
             <p id="modal-meaning" style="font-size: 18px; font-weight: bold; margin-bottom: 16px;"></p>
             <p style="font-size: 14px; color: #aaa; margin-bottom: 8px;">💡 딥다이브 연상 스토리:</p>
             <p id="modal-story" style="font-size: 15px; line-height: 1.5; color: #fff; margin-top: 0;"></p>
             <div id="modal-link-container" style="margin-top: 20px; text-align: right;"></div>
-            <button onclick="closeModal()" class="action-btn" style="width: 100%; background: #333; margin-top: 24px; padding: 12px; font-size: 16px;">닫기</button>
+            <button onclick="closeModal()" class="action-btn"
+                style="width: 100%; background: #333; margin-top: 24px; padding: 12px; font-size: 16px;">닫기</button>
         </div>
     </div>
 
@@ -308,11 +311,104 @@
 
         // 한자 DB
         const KANJI_DB = {
-            "宿": { "meaning": "숙소/잠잘 숙", "story": "집(宀)에서 사람이 일백(百)번 잠을 자는 곳이 '숙소'입니다." },
-            "泊": { "meaning": "머무를 박", "story": "물(氵)가에서 하얗게(白) 밤을 지새우며 배가 '머무는' 모습입니다." },
-            "税": { "meaning": "세금 세", "story": "벼(禾)를 수확해서 기쁘게(兌) 바치는 것이 '세금'입니다." },
-            "日": { "meaning": "날 일 / 해 일", "story": "[둥근 태양] + [가운데 흑점] = [해/날 日]", "link": "https://lifehackdeliver.tistory.com/entry/%EC%9D%BC%EB%B3%B8%EC%96%B4-%ED%95%9C%EC%9E%90-N5-%E6%97%A5" },
-            "一": { "meaning": "한 일", "story": "[손가락 하나] = [한 일 一]" }
+            "日": {
+                "meaning": "날/해 일",
+                "on": "ニチ、ジツ",
+                "kun": "ひ、-か",
+                "composition": "[네모난 태양] + [뿜어지는 빛 一]",
+                "story": "'日(날 일)'은 둥근 태양과 퍼져나가는 빛을 그린 상형문자다. 거북 껍데기(갑골문)에 새길 때 곡선 표현이 어려워 지금의 네모난 형태로 굳어졌다. 기본적으로 '해', '날', '낮'을 뜻하며, 부수로 쓰일 때는 태양의 주기와 특성에 따라 '시간', '날짜', '밝기', '날씨' 등의 의미를 갖는다."
+            },
+            "月": {
+                "meaning": "달 월",
+                "on": "ゲツ、ガツ",
+                "kun": "つき",
+                "composition": "[초승달의 윤곽] + [구름 조각]",
+                "story": "'月(달 월)'은 밤하늘에 뜬 초승달의 모양을 본뜬 상형문자다. 둥근 보름달 대신 굳이 초승달을 그린 이유는 둥근 해(日)와 구분하기 위해서다. 기본적으로 '달'을 뜻하며, 시간의 흐름에 따라 '달(month)'이나 '세월' 등의 의미로도 쓰인다."
+            },
+            "火": {
+                "meaning": "불 화",
+                "on": "カ",
+                "kun": "ひ",
+                "composition": "[타오르는 불꽃] + [사방으로 튀는 불똥]",
+                "story": "'火(불 화)'는 장작불이 활활 타오르는 모습을 그린 상형문자다. 가운데는 위로 솟구치는 불꽃을, 양옆은 사방으로 튀는 불똥을 표현했다. 부수로 쓰일 때는 글자 아래에서 점 네 개(灬) 모양으로 바뀌며 '열기'나 '태우다'는 의미를 더한다."
+            },
+            "水": {
+                "meaning": "물 수",
+                "on": "スイ",
+                "kun": "みず",
+                "composition": "[흐르는 물줄기] + [양옆의 물방울]",
+                "story": "'水(물 수)'는 시냇물이 바위를 부딪치며 굽이쳐 흐르는 모습을 그린 상형문자다. 가운데 굵은 선은 큰 물줄기를, 양옆은 튀어 오르는 물방울을 나타낸다. 부수로 쓰일 때는 글자 왼쪽(氵)이나 아래(氺)에 붙어 '액체', '흐름', '강'과 관련된 의미를 갖는다."
+            },
+            "木": {
+                "meaning": "나무 목",
+                "on": "モク、ボク",
+                "kun": "き",
+                "composition": "[위로 뻗은 가지] + [땅에 박힌 뿌리]",
+                "story": "'木(나무 목)'은 흙에 단단히 뿌리내린 나무의 뼈대를 그린 상형문자다. 가로선은 위로 뻗은 나뭇가지를, 세로선은 굵은 기둥을, 양 갈래의 선은 땅속으로 파고든 뿌리를 표현했다. 부수로 쓰일 때는 '나무의 종류', '목재', '가구' 등의 의미를 전달한다."
+            },
+            "金": {
+                "meaning": "쇠/돈 금",
+                "on": "キン、コン",
+                "kun": "かね",
+                "composition": "[흙 土] + [반짝이는 사금 丷]",
+                "story": "'金(쇠/돈 금)'은 땅속 깊은 곳에 묻혀 반짝이는 귀한 광물을 그린 글자다. 위쪽은 흙(土)과 덮개(亼)를 뜻하고, 아래의 점 두 개는 흙 속에 묻힌 사금이나 금괴를 의미한다. 귀한 금속에서 유래하여 현대에는 '돈', '화폐', '금속'의 뜻으로 널리 쓰인다."
+            },
+            "土": {
+                "meaning": "흙 토",
+                "on": "ド、ト",
+                "kun": "つち",
+                "composition": "[평평한 땅 一] + [돋아나는 새싹 十]",
+                "story": "'土(흙 토)'는 비옥한 땅 위로 생명이 솟아나는 모습을 그린 글자다. 아래의 긴 가로선은 평평한 땅의 표면을, 그 위의 십자가 모양은 흙을 뚫고 나오는 흙무더기나 새싹을 표현했다. 부수로 쓰일 때는 '땅', '흙', '경계'와 관련된 의미를 갖는다."
+            },
+            "山": {
+                "meaning": "뫼 산",
+                "on": "サン",
+                "kun": "やま",
+                "composition": "[우뚝 솟은 세 개의 봉우리]",
+                "story": "'山(뫼 산)'은 뾰족한 산봉우리가 나란히 솟아있는 모습을 본뜬 상형문자다. 가장 높은 주봉우리를 가운데 두고 양옆으로 낮은 봉우리들이 이어져 있는 웅장한 자연의 형태를 세 개의 세로선으로 단순하게 시각화했다."
+            },
+            "川": {
+                "meaning": "내 천",
+                "on": "セン",
+                "kun": "かわ",
+                "composition": "[굽이쳐 흐르는 세 줄기 물결]",
+                "story": "'川(내 천)'은 강물이 일정한 방향으로 끊임없이 흘러가는 모양을 그린 상형문자다. 세 개의 세로선은 양쪽 강둑 사이로 물결이 굽이치며 도도하게 흘러가는 형태를 선으로 단순화한 것이다."
+            },
+            "雨": {
+                "meaning": "비 우",
+                "on": "ウ",
+                "kun": "あめ",
+                "composition": "[구름 덮인 하늘 冂] + [떨어지는 빗방울 ⠪]",
+                "story": "'雨(비 우)'는 하늘에서 빗방울이 후둑후둑 떨어지는 모습을 그린 상형문자다. 위쪽의 덮개(冂)는 먹구름이 잔뜩 낀 하늘을 뜻하고, 안쪽의 점 4개는 구름에서 떨어지는 빗방울을 생동감 있게 표현했다. 부수로 쓰일 때는 '날씨'나 '기상 현상'을 의미한다."
+            },
+            "天": {
+                "meaning": "하늘 천",
+                "on": "テン",
+                "kun": "あまつ",
+                "composition": "[사람 大] + [머리 위 끝없는 공간 一]",
+                "story": "'天(하늘 천)'은 사람이 서 있는 머리 꼭대기 위의 끝없는 하늘을 표현한 글자다. 팔다리를 뻗고 당당히 서 있는 사람(大)의 머리 위에 ㅡ자를 그어, 인간의 머리 위로 펼쳐진 가장 높고 넓은 공간을 시각화했다."
+            },
+            "空": {
+                "meaning": "빌/하늘 공",
+                "on": "クウ",
+                "kun": "そら、あ.く",
+                "composition": "[구멍 혈 穴] + [만드는 도구 工]",
+                "story": "'空(빌 공)'은 동굴처럼 텅 비어 있는 공간을 뜻한다. 동굴을 뜻하는 구멍 혈(穴)에 도구를 뜻하는 장인 공(工)이 결합되어 '파내서 공간을 비우다'라는 뜻이 되었다. 텅 비어 끝없이 펼쳐진 공간이라는 의미에서 '하늘'을 뜻하게 되었다."
+            },
+            "気": {
+                "meaning": "기운 기",
+                "on": "キ、ケ",
+                "kun": "-",
+                "composition": "[숨결 气] + [뻗어나가는 에너지 乂]",
+                "story": "'気(기운 기)'는 눈에 보이지 않지만 뿜어져 나오는 생명력이나 에너지를 뜻한다. 구름이 피어오르는 모양의 기운 기(气) 안에 쌀(米)이 끓으며 내는 밥의 수증기를 그렸으나, 일본어 상용한자에서는 안쪽이 메 산(乂) 모양으로 간략하게 줄어들었다."
+            },
+            "白": {
+                "meaning": "흰 백",
+                "on": "ハク、ビャク",
+                "kun": "しろ、しろ.い",
+                "composition": "[햇빛 日] + [살짝 내민 햇무리 丿]",
+                "story": "'白(흰 백)'은 떠오르는 태양이 뿜어내는 밝고 하얀 빛을 그린 글자다. 해(日) 위로 삐져나온 짧은 획(丿)은 태양 주위로 퍼지는 햇무리를 표현한 것이다. 태양의 밝은 빛에서 유래하여 '하얗다', '밝다', '분명하다'라는 의미를 갖는다."
+            }
         };
 
         const video = document.getElementById('video');
@@ -1110,11 +1206,11 @@
             const linkContainer = document.getElementById('modal-link-container');
 
             titleEl.innerText = `【 ${kj} 】`;
-            
+
             if (KANJI_DB[kj]) {
                 meaningEl.innerText = KANJI_DB[kj].meaning;
                 storyEl.innerText = KANJI_DB[kj].story;
-                
+
                 if (KANJI_DB[kj].link) {
                     linkContainer.innerHTML = `<a href="${KANJI_DB[kj].link}" target="_blank" style="color: #4da6ff; text-decoration: underline; font-weight: bold; font-size: 16px;">[상세정보]</a>`;
                 } else {
@@ -1125,7 +1221,7 @@
                 storyEl.innerText = "아직 DB에 업데이트되지 않은 한자입니다.";
                 linkContainer.innerHTML = '';
             }
-            
+
             modal.style.display = 'flex';
         }
 
